@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { contacts, initialMessages } from '../data/contact';
 import { computeFromManifest } from 'next/dist/build/utils';
+import Sidebar from './Sidebar';
+import ChatWindow from './ChatWindow';
 
 const ChatLayout = () => {
   const [selectedContact, setSelectedContact] = useState(contacts[0]);
@@ -32,11 +34,11 @@ const ChatLayout = () => {
     };
     const currentContactMessages = messages[selectedContact.id] || [];
     //
-    const upatededMessages = [...currentContactMessages, newMessage];
+    const upadatedMessages = [...currentContactMessages, newMessage];
     //
     setMessages((prevMessages) => ({
       ...prevMessages,
-      [selectedContact.id]: upatededMessages,
+      [selectedContact.id]: upadatedMessages,
     }));
     // {1:{
     //   id:1,
@@ -51,12 +53,12 @@ const ChatLayout = () => {
       parts: msg.text,
     }));
     try {
-      const response = await fetch('api/fetch/strean', {
+      const response = await fetch('api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: text.history }),
+        body: JSON.stringify({ message: text, history }),
       });
       if (!response.body) return;
       setIsTyping(false);
@@ -89,7 +91,7 @@ const ChatLayout = () => {
       // so from intial messages to the new mesages in that id
       setMessages((prevMessages) => ({
         ...prevMessages,
-        [selectedContact.id]: [...upatededMessages, botMessagePlaceholder],
+        [selectedContact.id]: [...upadatedMessages, botMessagePlaceholder],
       }));
       //keep adding the bot messages and display with that particular id chatting
       while (true) {
@@ -140,15 +142,30 @@ const ChatLayout = () => {
       };
       setMessages((prevMessages) => ({
         ...prevMessages,
-        [selectedContact.id]: [...updatedMessages, errorMessage],
+        [selectedContact.id]: [...upadatedMessages, errorMessage],
       }));
       setIsTyping(false);
     }
   };
   return (
     <div className="flex h-screen bg-white text-gray-800">
-      <Sidebar />
+      <Sidebar
+        contacts={contacts}
+        onSelectContact={handleSelectContact}
+        selectedContact={selectedContact}
+        isOpen={sidebarOpen}
+        setIsOpen={setSideBarOpen}
+      />
       <div className="flex flex-col flex-grow"></div>
+      <ChatWindow
+        contact={selectedContact}
+        messages={messages[selectedContact.id] || []}
+        onSendMessage={handleSendMessage}
+        toggleSidebar={() => {
+          setSideBarOpen(!sidebarOpen);
+        }}
+        isTyping={isTyping}
+      />
     </div>
   );
 };

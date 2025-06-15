@@ -108,5 +108,4 @@ export const initialMessages = {
       timestamp: 'Yesterday',
     },
   ],
-  // Add more initial messages for other contacts if needed
 };

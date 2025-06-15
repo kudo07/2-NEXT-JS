@@ -1,129 +1,136 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { contacts, initialMessages } from '../data/contact';
-import { computeFromManifest } from 'next/dist/build/utils';
+import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import ChatWindow from './ChatWindow';
-
-const ChatLayout = () => {
+import { contacts, initialMessages } from '../data/contact';
+export default function ChatLayout() {
   const [selectedContact, setSelectedContact] = useState(contacts[0]);
-  const [messages, setMessages] = useState(initialMessages);
-  const [sidebarOpen, setSideBarOpen] = useState(true);
+  const [messages, setMessages] = useState(() => {
+    const initializedMessages = {};
+    for (const contactId in initialMessages) {
+      initializedMessages[contactId] = initialMessages[contactId].map(
+        (msg) => ({ ...msg, status: 'delivered' })
+      );
+    }
+    return initializedMessages;
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
 
   useEffect(() => {
-    if (window.innerWidth < 768) {
-      setSideBarOpen(false);
+    if (window.innerWidth < 768 && selectedContact) {
+      setSidebarOpen(false);
     }
   }, [selectedContact]);
 
-  //
   const handleSelectContact = (contact) => {
     setSelectedContact(contact);
   };
+
   const handleSendMessage = async (text) => {
+    const newMessageId = Date.now();
     const newMessage = {
-      id: Date.now(),
+      id: newMessageId,
       text,
       sender: 'me',
       timestamp: new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
       }),
+      status: 'sent',
     };
+
     const currentContactMessages = messages[selectedContact.id] || [];
-    //
-    const upadatedMessages = [...currentContactMessages, newMessage];
-    //
+    const updatedMessages = [...currentContactMessages, newMessage];
+
     setMessages((prevMessages) => ({
       ...prevMessages,
-      [selectedContact.id]: upadatedMessages,
+      [selectedContact.id]: updatedMessages,
     }));
-    // {1:{
-    //   id:1,
-    //   messages,
-    // },{2:id:2,message}, newMessage}
+
+    setTimeout(() => {
+      setMessages((prevMessages) => {
+        const newContactMessages = (prevMessages[selectedContact.id] || []).map(
+          (m) => (m.id === newMessageId ? { ...m, status: 'delivered' } : m)
+        );
+        return {
+          ...prevMessages,
+          [selectedContact.id]: newContactMessages,
+        };
+      });
+    }, 1000);
+
     setIsTyping(true);
-    // wants to format into api for the gemini
-    // gemini sets the format [{role:'user',parts:"hello"}]
-    // gemini expects this message
-    const history = (messages[selectedContact.id] || []).map((msg) => ({
+
+    let history = (messages[selectedContact.id] || []).map((msg) => ({
       role: msg.sender === 'me' ? 'user' : 'model',
-      parts: msg.text,
+      parts: [{ text: msg.text }],
     }));
+
+    // FIX: The Gemini API requires history to start with a 'user' role.
+    // This ensures we trim any leading 'model' messages from the history.
+    const firstUserIndex = history.findIndex((h) => h.role === 'user');
+    if (firstUserIndex > 0) {
+      history = history.slice(firstUserIndex);
+    } else if (firstUserIndex === -1 && history.length > 0) {
+      history = [];
+    }
+
     try {
-      const response = await fetch('api/chat/stream', {
+      const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ message: text, history }),
       });
+
       if (!response.body) return;
       setIsTyping(false);
-      // i have to read the chunks here and display in the ui
-      // like  .json() get the whole data bu here i am using stream for chunking and display real time appending text
-      // in the ui
-      // give the chunks http response instead waiting for the whole response
-      // get data piece by piecce
+
       const reader = response.body.getReader();
-      //converts binary data into the string
       const decoder = new TextDecoder();
-      //ascii or utf-8
       let botMessageText = '';
       const botMessageId = Date.now() + 1;
 
-      // add a placeholder for bot's mesage
-      // when i type so ot replies with text and that the timestamp
       const botMessagePlaceholder = {
         id: botMessageId,
-        text: '.......',
+        text: '',
         sender: 'them',
         timestamp: new Date().toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
         }),
+        status: 'received',
       };
-      // add the bot replies under that specific id
-      // when i click the id 1 for chat then when i reply then the bot reply
-      // that replies is adding in that particular id with the replies and bot replies with the id
-      // so from intial messages to the new mesages in that id
+
       setMessages((prevMessages) => ({
         ...prevMessages,
-        [selectedContact.id]: [...upadatedMessages, botMessagePlaceholder],
+        [selectedContact.id]: [
+          ...(prevMessages[selectedContact.id] || []),
+          botMessagePlaceholder,
+        ],
       }));
-      //keep adding the bot messages and display with that particular id chatting
+
       while (true) {
         const { value, done } = await reader.read();
-        // await for value
-        // value  is utf-8 acii harray for the text
-        if (done) {
-          break;
-        }
-        // append chunks piece by -2
+        if (done) break;
+
         botMessageText += decoder.decode(value, { stream: true });
-        // converts the ascii array into the string text which was typed
-        // previously i add the placeholder for the bot reply
-        // now bot is replying chunk by chunk from decoder and update the placeholder message witht he growing text
-        // i want to add the message chunk in that placehlder from the messagges for that particular id
+
         setMessages((prevMessages) => {
-          // mutate with the new state
-          // select the previous messages for that id selected
           const newContactMessages = [...prevMessages[selectedContact.id]];
-          // select that placeholder which we add previously
           const botMessageIndex = newContactMessages.findIndex(
             (m) => m.id === botMessageId
           );
-          // if not found add the text with start chunk as botMessageText
-          if (botMessageIndex == -1) {
+          if (botMessageIndex !== -1) {
             newContactMessages[botMessageIndex] = {
               ...newContactMessages[botMessageIndex],
               text: botMessageText,
             };
           }
           return {
-            // return the updated meesage object
             ...prevMessages,
             [selectedContact.id]: newContactMessages,
           };
@@ -139,14 +146,16 @@ const ChatLayout = () => {
           hour: '2-digit',
           minute: '2-digit',
         }),
+        status: 'error',
       };
       setMessages((prevMessages) => ({
         ...prevMessages,
-        [selectedContact.id]: [...upadatedMessages, errorMessage],
+        [selectedContact.id]: [...updatedMessages, errorMessage],
       }));
       setIsTyping(false);
     }
   };
+
   return (
     <div className="flex h-screen bg-white text-gray-800">
       <Sidebar
@@ -154,20 +163,17 @@ const ChatLayout = () => {
         onSelectContact={handleSelectContact}
         selectedContact={selectedContact}
         isOpen={sidebarOpen}
-        setIsOpen={setSideBarOpen}
+        setIsOpen={setSidebarOpen}
       />
-      <div className="flex flex-col flex-grow"></div>
-      <ChatWindow
-        contact={selectedContact}
-        messages={messages[selectedContact.id] || []}
-        onSendMessage={handleSendMessage}
-        toggleSidebar={() => {
-          setSideBarOpen(!sidebarOpen);
-        }}
-        isTyping={isTyping}
-      />
+      <div className="flex flex-col flex-grow min-w-0">
+        <ChatWindow
+          contact={selectedContact}
+          messages={messages[selectedContact.id] || []}
+          onSendMessage={handleSendMessage}
+          toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          isTyping={isTyping}
+        />
+      </div>
     </div>
   );
-};
-
-export default ChatLayout;
+}
